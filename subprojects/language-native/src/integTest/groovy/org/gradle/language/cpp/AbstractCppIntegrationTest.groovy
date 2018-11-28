@@ -17,7 +17,6 @@
 package org.gradle.language.cpp
 
 import org.gradle.nativeplatform.MachineArchitecture
-import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform
 import org.gradle.util.Matchers
 
 import static org.gradle.nativeplatform.fixtures.ToolChainRequirement.WINDOWS_GCC
@@ -47,6 +46,26 @@ abstract class AbstractCppIntegrationTest extends AbstractCppComponentIntegratio
         failure.assertHasDescription("Execution failed for task '$developmentBinaryCompileTask'.")
         failure.assertHasCause("A build operation failed.")
         failure.assertThatCause(Matchers.containsText("C++ compiler failed while compiling broken.cpp"))
+    }
+
+    // TODO Move this to AbstractCppComponentIntegrationTest when unit test works properly with architecture
+    def "can build for current machine when multiple target machines are specified"() {
+        assumeFalse(toolChain.meets(WINDOWS_GCC))
+
+        given:
+        makeSingleProject()
+        componentUnderTest.writeToProject(testDirectory)
+
+        and:
+        buildFile << """
+            ${componentUnderTestDsl} {
+                targetMachines = [machines.linux(), machines.macOS(), machines.windows()]
+            }
+        """
+
+        expect:
+        succeeds taskNameToAssembleDevelopmentBinary
+        result.assertTasksExecutedAndNotSkipped getTasksToAssembleDevelopmentBinaryWithOperatingSystemFamily(currentOsFamilyName), ":${taskNameToAssembleDevelopmentBinary}"
     }
 
     // TODO Move this to AbstractCppComponentIntegrationTest when unit test works properly with architecture
@@ -138,13 +157,10 @@ abstract class AbstractCppIntegrationTest extends AbstractCppComponentIntegratio
     }
 
     protected String getTaskNameToAssembleDevelopmentBinaryWithArchitecture(String architecture) {
-        return ":assembleDebug${getVariantSuffix(architecture)}"
-    }
-
-    protected String getVariantSuffix(String architecture) {
-        String operatingSystemFamily = DefaultNativePlatform.currentOperatingSystem.toFamilyName()
-        return operatingSystemFamily.toLowerCase().capitalize() + architecture.toLowerCase().capitalize()
+        return ":assembleDebug${architecture.toLowerCase().capitalize()}"
     }
 
     protected abstract List<String> getTasksToAssembleDevelopmentBinaryWithArchitecture(String architecture)
+
+    protected abstract List<String> getTasksToAssembleDevelopmentBinaryWithOperatingSystemFamily(String operatingSystemFamily)
 }

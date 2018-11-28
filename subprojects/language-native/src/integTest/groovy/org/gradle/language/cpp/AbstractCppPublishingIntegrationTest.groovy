@@ -16,6 +16,7 @@
 
 package org.gradle.language.cpp
 
+import org.gradle.language.nativeplatform.internal.Dimensions
 import org.gradle.nativeplatform.fixtures.AbstractInstalledToolChainIntegrationSpec
 import org.gradle.nativeplatform.fixtures.ExecutableFixture
 import org.gradle.test.fixtures.file.TestFile
@@ -26,7 +27,7 @@ abstract class AbstractCppPublishingIntegrationTest extends AbstractInstalledToo
     abstract List<String> getLinkages()
     abstract List<String> getMainModuleArtifacts(String module, String version)
     abstract List<String> getVariantModuleArtifacts(String variantModuleNameWithVersion)
-    abstract TestFile getVariantSourceFile(String module, String buildType, Map<String, String> targetMachine)
+    abstract TestFile getVariantSourceFile(String module, Map<String, VariantDimension> variantContext)
     abstract Map<String, String> getVariantFileInformation(String linkage, String module, String variantModuleNameWithVersion)
     abstract boolean publishesArtifactForLinkage(String linkage)
 
@@ -55,22 +56,24 @@ abstract class AbstractCppPublishingIntegrationTest extends AbstractInstalledToo
         ['debug', 'release'].each { buildType ->
             linkages.each { linkage ->
                 targetMachines.each { machine ->
-                    String normalizedArchitecture = machine.architecture.replace('-', '_')
-                    String osFamilyNormalized = machine.os.toLowerCase()
-                    assert mainMetadata.variant("${buildType}${osFamilyNormalized.capitalize()}${machine.architecture.capitalize()}${linkage}").availableAt.coords == "${group}:${module}_${buildType}_${osFamilyNormalized}_${normalizedArchitecture}:${version}"
+                    String architectureNormalized = Dimensions.createDimensionSuffix(machine.architecture, targetMachines.collect { it.architecture }.unique())
+                    String osFamilyNormalized = Dimensions.createDimensionSuffix(machine.os, targetMachines.collect { it.os }.unique())
+                    assert mainMetadata.variant("${buildType}${osFamilyNormalized.capitalize()}${architectureNormalized.capitalize()}${linkage.capitalize()}").availableAt.coords == "${group}:${module}_${buildType}${osFamilyNormalized.empty ? "" : "_${osFamilyNormalized.toLowerCase()}"}${architectureNormalized.empty ? "" : "_${architectureNormalized.toLowerCase().replace("-", "_")}"}:${version}"
                 }
             }
         }
     }
 
-    void assertVariantIsPublished(String group, String module, String version, String buildType, Map<String, String> targetMachine, List<String> dependencies = []) {
-        String normalizedArchitecture = targetMachine.architecture.replace('-', '_')
-        String variantModuleName = "${module}_${buildType}_${targetMachine.os.toLowerCase()}_${normalizedArchitecture}"
+    void assertVariantIsPublished(String group, String module, String version, Map<String, VariantDimension> variantContext, List<String> dependencies = []) {
+        def buildType = variantContext.buildType
+        def architecture = variantContext.architecture
+        def operatingSystem = variantContext.os
+        String variantModuleName = "${module}${buildType.asPublishingName}${operatingSystem.asPublishingName}${architecture.asPublishingName}"
         String variantModuleNameWithVersion = "${variantModuleName}-${version}"
         def publishedModule = mavenRepo.module(group, variantModuleName, version)
         publishedModule.assertPublished()
         publishedModule.assertArtifactsPublished(getVariantModuleArtifacts(variantModuleNameWithVersion))
-        publishedModule.artifactFile(type: getVariantFileInformation('Runtime', module, variantModuleNameWithVersion).extension).assertIsCopyOf(getVariantSourceFile(module, buildType, targetMachine))
+        publishedModule.artifactFile(type: getVariantFileInformation('Runtime', module, variantModuleNameWithVersion).extension).assertIsCopyOf(getVariantSourceFile(module, variantContext))
 
         assert publishedModule.parsedPom.scopes.size() == dependencies.isEmpty() ? 0 : 1
         if (!dependencies.isEmpty()) {
@@ -80,7 +83,7 @@ abstract class AbstractCppPublishingIntegrationTest extends AbstractInstalledToo
         def publishedMetadata = publishedModule.parsedModuleMetadata
         assert publishedMetadata.variants.size() == linkages.size()
         linkages.each { linkage ->
-            def publishedVariant = publishedMetadata.variant("${buildType}${targetMachine.os.toLowerCase().capitalize()}${targetMachine.architecture.capitalize()}${linkage}")
+            def publishedVariant = publishedMetadata.variant("${buildType.name}${operatingSystem.asVariantName}${architecture.asVariantName}${linkage}")
             assert publishedVariant.dependencies.size() == dependencies.size()
             publishedVariant.dependencies.eachWithIndex { dependency, int i ->
                 assert dependency.coords == dependencies[i]
@@ -95,11 +98,70 @@ abstract class AbstractCppPublishingIntegrationTest extends AbstractInstalledToo
         }
     }
 
-    void assertVariantsArePublished(String group, String module, String version, List<String> buildTypes, List<Map<String, String>> targetMachines, List<String> dependencies = []) {
+    void assertVariantsArePublished(String group, String module, String version, List<String> buildTypes, List<Map<String, VariantDimension>> targetMachines, List<String> dependencies = []) {
         buildTypes.each { buildType ->
-            targetMachines.each { machine ->
-                assertVariantIsPublished(group, module, version, buildType, machine, dependencies)
+            targetMachines.findAll { it.os == currentOsFamilyName }.each { machine ->
+                def variantContext = [
+                        buildType: VariantDimension.of(buildType)
+                ].withDefault {VariantDimension.missing()}
+                if (targetMachines.collect({ it.os }).unique().size() > 1) {
+                    variantContext.os = VariantDimension.of(machine.os)
+                }
+                if (targetMachines.collect({ it.architecture }).unique().size() > 1) {
+                    variantContext.architecture = VariantDimension.of(machine.architecture)
+                }
+                assertVariantIsPublished(group, module, version, variantContext, dependencies)
             }
+        }
+    }
+
+    static abstract class VariantDimension {
+        abstract String getAsPath()
+        abstract String getAsPublishingName()
+        abstract String getAsVariantName()
+        abstract String getName()
+
+        static VariantDimension missing() {
+            return new MissingVariantDimension()
+        }
+
+        static VariantDimension of(String dimensionName) {
+            return new DefaultVariantDimension(dimensionName.toLowerCase())
+        }
+
+        static class DefaultVariantDimension extends VariantDimension {
+            private final String normalizedDimensionName
+
+            DefaultVariantDimension(String normalizedDimensionName) {
+                this.normalizedDimensionName = normalizedDimensionName
+            }
+
+            @Override
+            String getAsPath() {
+                return "/${normalizedDimensionName}"
+            }
+
+            @Override
+            String getAsPublishingName() {
+                return "_${normalizedDimensionName.replace("-", "_")}"
+            }
+
+            @Override
+            String getAsVariantName() {
+                return normalizedDimensionName.capitalize()
+            }
+
+            @Override
+            String getName() {
+                return normalizedDimensionName
+            }
+        }
+
+        static class MissingVariantDimension extends VariantDimension {
+            final String asPath = ""
+            final String asPublishingName = ""
+            final String asVariantName = ""
+            final String name = ""
         }
     }
 

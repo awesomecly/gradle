@@ -21,18 +21,23 @@ import org.gradle.nativeplatform.fixtures.app.SourceElement
 
 class CppBothLibraryLinkageIntegrationTest extends AbstractCppIntegrationTest {
     @Override
-    protected List<String> getTasksToAssembleDevelopmentBinary() {
-        return [":compileDebugSharedCpp", ":linkDebugShared"]
+    protected List<String> getTasksToAssembleDevelopmentBinary(String variant) {
+        return [":compileDebugShared${variant.capitalize()}Cpp", ":linkDebugShared${variant.capitalize()}"]
     }
 
     @Override
     protected List<String> getTasksToAssembleDevelopmentBinaryWithArchitecture(String architecture) {
-        return [":compileDebugShared${getVariantSuffix(architecture)}Cpp", ":linkDebugShared${getVariantSuffix(architecture)}"]
+        return getTasksToAssembleDevelopmentBinary(architecture.toLowerCase())
+    }
+
+    @Override
+    protected List<String> getTasksToAssembleDevelopmentBinaryWithOperatingSystemFamily(String operatingSystemFamily) {
+        return getTasksToAssembleDevelopmentBinary(operatingSystemFamily.toLowerCase())
     }
 
     @Override
     protected String getTaskNameToAssembleDevelopmentBinaryWithArchitecture(String architecture) {
-        return ":assembleDebugShared${getVariantSuffix(architecture)}"
+        return ":assembleDebugShared${architecture.toLowerCase().capitalize()}"
     }
 
     @Override

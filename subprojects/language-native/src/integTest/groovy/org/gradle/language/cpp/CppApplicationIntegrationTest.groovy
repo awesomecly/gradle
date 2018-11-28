@@ -44,14 +44,18 @@ class CppApplicationIntegrationTest extends AbstractCppIntegrationTest implement
     }
 
     @Override
-    protected List<String> getTasksToAssembleDevelopmentBinary() {
-        return [":compileDebugCpp", ":linkDebug", ":installDebug"]
+    protected List<String> getTasksToAssembleDevelopmentBinary(String variant) {
+        return [":compileDebug${variant.capitalize()}Cpp", ":linkDebug${variant.capitalize()}", ":installDebug${variant.capitalize()}"]
     }
 
     @Override
     protected List<String> getTasksToAssembleDevelopmentBinaryWithArchitecture(String architecture) {
-        String variantSuffix = getVariantSuffix(architecture)
-        return [":compileDebug${variantSuffix}Cpp", ":linkDebug${variantSuffix}", ":installDebug${variantSuffix}"]
+        return getTasksToAssembleDevelopmentBinary(architecture.toLowerCase())
+    }
+
+    @Override
+    protected List<String> getTasksToAssembleDevelopmentBinaryWithOperatingSystemFamily(String operatingSystemFamily) {
+        return getTasksToAssembleDevelopmentBinary(operatingSystemFamily.toLowerCase())
     }
 
     @Override
@@ -428,10 +432,10 @@ class CppApplicationIntegrationTest extends AbstractCppIntegrationTest implement
         expect:
         succeeds ":app:assemble"
 
-        result.assertTasksExecuted(tasks(':hello').withArchitecture(currentArchitecture).debug.allToLink, tasks(':app').withArchitecture(currentArchitecture).debug.allToInstall, ":app:assemble")
-        executable("app/build/exe/main/debug/${currentOsFamilyName.toLowerCase()}/${currentArchitecture}/app").assertExists()
-        sharedLibrary("hello/build/lib/main/debug/${currentOsFamilyName.toLowerCase()}/${currentArchitecture}/hello").assertExists()
-        def installation = installation("app/build/install/main/debug/${currentOsFamilyName.toLowerCase()}/${currentArchitecture}")
+        result.assertTasksExecuted(tasks(':hello').withOperatingSystemFamily(currentOsFamilyName).debug.allToLink, tasks(':app').withOperatingSystemFamily(currentOsFamilyName).debug.allToInstall, ":app:assemble")
+        executable("app/build/exe/main/debug/${currentOsFamilyName.toLowerCase()}/app").assertExists()
+        sharedLibrary("hello/build/lib/main/debug/${currentOsFamilyName.toLowerCase()}/hello").assertExists()
+        def installation = installation("app/build/install/main/debug/${currentOsFamilyName.toLowerCase()}")
         installation.exec().out == app.expectedOutput
         installation.assertIncludesLibraries("hello")
     }
